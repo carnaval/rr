@@ -52,11 +52,12 @@ public:
   static const dev_t NO_DEVICE = 0;
   static const ino_t NO_INODE = 0;
 
-  KernelMapping() : device_(0), inode_(0), prot_(0), flags_(0), offset(0) {}
+  KernelMapping() : tracee_fd(-3), device_(0), inode_(0), prot_(0), flags_(0), offset(0) {}
   KernelMapping(remote_ptr<void> start, remote_ptr<void> end,
                 const std::string& fsname, dev_t device, ino_t inode, int prot,
                 int flags, off64_t offset = 0)
       : MemoryRange(start, end),
+        tracee_fd(-2),
         fsname_(fsname),
         device_(device),
         inode_(inode),
@@ -68,6 +69,7 @@ public:
 
   KernelMapping(const KernelMapping& o)
       : MemoryRange(o),
+        tracee_fd(o.tracee_fd),
         fsname_(o.fsname_),
         device_(o.device_),
         inode_(o.inode_),
@@ -115,11 +117,12 @@ public:
   */
   std::string str() const {
     char str[200];
-    sprintf(str, "%8p-%8p %c%c%c%c %08" PRIx64 " %02x:%02x %-10ld ",
+    sprintf(str, "%8p-%8p %c%c%c%c %08" PRIx64 " %02x:%02x %-10ld (tfd %d)",
             (void*)start().as_int(), (void*)end().as_int(),
             (PROT_READ & prot_) ? 'r' : '-', (PROT_WRITE & prot_) ? 'w' : '-',
             (PROT_EXEC & prot_) ? 'x' : '-', (MAP_SHARED & flags_) ? 's' : 'p',
-            offset, (int)MAJOR(device()), (int)MINOR(device()), (long)inode());
+            offset, (int)MAJOR(device()), (int)MINOR(device()), (long)inode(),
+            tracee_fd);
     return str + fsname();
   }
 
@@ -148,7 +151,7 @@ public:
     fake_stat.st_ino = inode();
     return fake_stat;
   }
-
+  int tracee_fd;
 private:
   // The kernel's name for the mapping, as per /proc/<pid>/maps. This must
   // be exactly correct.
@@ -355,7 +358,7 @@ public:
   KernelMapping map(remote_ptr<void> addr, size_t num_bytes, int prot,
                     int flags, off64_t offset_bytes, const std::string& fsname,
                     dev_t device, ino_t inode,
-                    const KernelMapping* recorded_map = nullptr);
+                    const KernelMapping* recorded_map = nullptr, int tracee_fd = -1);
 
   /**
    * Return the mapping and mapped resource for the byte at address 'addr'.

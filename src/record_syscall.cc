@@ -3082,7 +3082,6 @@ static void process_execve(RecordTask* t, TaskSyscallState& syscall_state) {
                                 vvar.start(), vvar.size());
       t->vm()->unmap(vvar.start(), vvar.size());
     }
-
     for (auto& km : stacks) {
       auto mode = t->trace_writer().write_mapped_region(
           km, km.fake_stat(), TraceWriter::EXEC_MAPPING);

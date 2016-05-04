@@ -405,12 +405,13 @@ static void add_range(set<MemoryRange>& ranges, const MemoryRange& range) {
 KernelMapping AddressSpace::map(remote_ptr<void> addr, size_t num_bytes,
                                 int prot, int flags, off64_t offset_bytes,
                                 const string& fsname, dev_t device, ino_t inode,
-                                const KernelMapping* recorded_map) {
+                                const KernelMapping* recorded_map, int tracee_fd) {
   LOG(debug) << "mmap(" << addr << ", " << num_bytes << ", " << HEX(prot)
              << ", " << HEX(flags) << ", " << HEX(offset_bytes);
   num_bytes = ceil_page_size(num_bytes);
   KernelMapping m(addr, addr + num_bytes, fsname, device, inode, prot, flags,
                   offset_bytes);
+  m.tracee_fd = tracee_fd;
   if (!num_bytes) {
     return m;
   }

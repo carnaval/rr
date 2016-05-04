@@ -75,7 +75,7 @@ AutoRemoteSyscalls::AutoRemoteSyscalls(Task* t,
 
 static bool is_usable_area(const KernelMapping& km) {
   return (km.prot() & (PROT_READ | PROT_WRITE)) == (PROT_READ | PROT_WRITE) &&
-         (km.flags() & MAP_PRIVATE);
+    true; //(km.flags() & MAP_PRIVATE);
 }
 
 void AutoRemoteSyscalls::maybe_fix_stack_pointer() {

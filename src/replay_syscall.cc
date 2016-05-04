@@ -325,6 +325,7 @@ static void restore_mapped_region(ReplayTask* t, AutoRemoteSyscalls& remote,
   ino_t inode = KernelMapping::NO_INODE;
   int flags = km.flags();
   uint64_t offset_bytes = 0;
+  int dzfd = -1;
   switch (data.source) {
     case TraceReader::SOURCE_FILE: {
       struct stat real_file;
@@ -339,20 +340,35 @@ static void restore_mapped_region(ReplayTask* t, AutoRemoteSyscalls& remote,
     }
     case TraceReader::SOURCE_TRACE:
     case TraceReader::SOURCE_ZERO:
-      flags |= MAP_ANONYMOUS;
-      remote.infallible_mmap_syscall(km.start(), km.size(), km.prot(),
-                                     (flags & ~MAP_GROWSDOWN) | MAP_FIXED, -1,
+      {
+        if (km.is_stack()) {
+          remote_ptr<char> theptr = remote.infallible_mmap_syscall(remote_ptr<void>(), 0x1000, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0).cast<char>(); //TODO unmap this
+          t->write_mem(theptr, "/dev/shm/mystack", 17);
+          
+          {
+            dzfd = remote.infallible_syscall(syscall_number_for_open(remote.arch()), theptr, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU);
+            remote.infallible_syscall(77/*ftruncate*/, dzfd, km.size());
+            printf("GOT %d\n", dzfd);
+            unlink("/dev/shm/mystack");
+          }
+          flags = (flags & ~MAP_PRIVATE & ~MAP_ANONYMOUS) | MAP_SHARED;
+        } else {
+          flags |= MAP_ANONYMOUS;
+        }
+        remote.infallible_mmap_syscall(km.start(), km.size(), km.prot(),
+                                     (flags & ~MAP_GROWSDOWN) | MAP_FIXED, dzfd,
                                      0);
-      // The data, if any, will be written back by
-      // ReplayTask::apply_all_data_records_from_trace
-      break;
+        // The data, if any, will be written back by
+        // ReplayTask::apply_all_data_records_from_trace
+        break;
+      }
     default:
       ASSERT(t, false) << "Unknown data source";
       break;
   }
 
   t->vm()->map(km.start(), km.size(), km.prot(), flags, offset_bytes,
-               real_file_name, device, inode, &km);
+               real_file_name, device, inode, &km, dzfd);
 }
 
 static void process_execve(ReplayTask* t, const TraceFrame& trace_frame,
