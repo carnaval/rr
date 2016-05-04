@@ -77,6 +77,19 @@ string invoke_info_checkpoints(GdbServer& gdb_server, Task*,
 static SimpleGdbCommand info_checkpoints("info checkpoints",
                                          invoke_info_checkpoints);
 
+string invoke_set_condition(GdbServer& gdb_server, Task *t,
+                            const vector<string>& args)
+{
+  (void)gdb_server;
+  unsigned long val = stol(args[1]);
+  char *ptr = t->read_mem(t->condition_pages);
+  t->write_mem(remote_ptr<unsigned long>((uintptr_t)ptr), val);
+  return string("wrote ") + to_string(val) + ".";
+}
+
+static SimpleGdbCommand set_condition("set-condition",
+                                      invoke_set_condition);
+
 /*static*/ void GdbCommand::init_auto_args() {
   checkpoint.add_auto_arg("rr-where");
 }

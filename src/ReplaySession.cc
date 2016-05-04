@@ -548,7 +548,8 @@ Completion ReplaySession::emulate_async_signal(
       }
       if (constraints.is_singlestep() ||
           (trap_reasons.watchpoint && t->vm()->has_any_watchpoint_changes()) ||
-          (trap_reasons.breakpoint && BKPT_USER == breakpoint_type)) {
+          (trap_reasons.breakpoint && BKPT_USER == breakpoint_type) ||
+          trap_reasons.condition) {
         /* Case (0) above: interrupt for the debugger. */
         LOG(debug) << "    trap was debugger singlestep/breakpoint";
         if (did_set_internal_breakpoint) {
@@ -769,7 +770,8 @@ Completion ReplaySession::emulate_deterministic_signal(
   }
   if (SIGTRAP == t->stop_sig()) {
     TrapReasons trap_reasons = t->compute_trap_reasons();
-    if (trap_reasons.singlestep || trap_reasons.watchpoint) {
+    if (trap_reasons.singlestep || trap_reasons.watchpoint ||
+        trap_reasons.condition) {
       // Singlestep or watchpoint must have been debugger-requested
       return INCOMPLETE;
     }

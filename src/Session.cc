@@ -337,6 +337,13 @@ BreakStatus Session::diagnose_debugger_trap(Task* t, RunCommand run_command) {
         break_status.breakpoint_hit = true;
       }
     }
+
+    if (trap_reasons.condition) {
+      Registers r = t->regs();
+      r.set_ip(remote_code_ptr(r.ip().register_value() + 4));
+      t->set_regs(r);
+      break_status.breakpoint_hit = true;
+    }
   }
 
   return break_status;

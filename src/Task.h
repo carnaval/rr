@@ -107,6 +107,7 @@ struct TrapReasons {
   bool watchpoint;
   /* Breakpoint instruction was executed. */
   bool breakpoint;
+  bool condition;
 };
 
 /**
@@ -698,6 +699,8 @@ public:
 
   /* Points at the in_replay flag in the tracee. */
   remote_ptr<unsigned char> in_replay_flag;
+
+  remote_ptr<char*> condition_pages;
 
   PropertyTable& properties() { return properties_; }
 

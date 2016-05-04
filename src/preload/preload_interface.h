@@ -146,6 +146,7 @@ struct rrcall_init_preload_params {
    * particular syscallbuf record. */
   PTR(void) breakpoint_table;
   int breakpoint_table_entry_size;
+  PTR(char*) condition_pages;
 };
 
 /**

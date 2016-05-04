@@ -51,7 +51,7 @@ void ReplayTask::validate_regs(uint32_t flags) {
 
   /* TODO: add perf counter validations (hw int, page faults, insts) */
   Registers::compare_register_files(this, "replaying", regs(), "recorded",
-                                    rec_regs, BAIL_ON_MISMATCH);
+                                    rec_regs, LOG_MISMATCHES);
 }
 
 const TraceFrame& ReplayTask::current_trace_frame() {

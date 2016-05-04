@@ -646,6 +646,7 @@ TrapReasons Task::compute_trap_reasons() {
   uintptr_t status = debug_status();
 
   reasons.singlestep = (status & DS_SINGLESTEP) != 0;
+  reasons.condition = false;
 
   // In VMWare Player 6.0.4 build-2249910, 32-bit Ubuntu x86 guest,
   // single-stepping does not trigger watchpoints :-(. So we have to
@@ -685,6 +686,8 @@ TrapReasons Task::compute_trap_reasons() {
     reasons.breakpoint = SI_KERNEL == si.si_code || TRAP_BRKPT == si.si_code;
     if (reasons.breakpoint) {
       ASSERT(this, as->is_breakpoint_instruction(this, ip_at_breakpoint));
+    } else if (SI_USER == si.si_code) {
+      reasons.condition = true;
     }
   }
   return reasons;
@@ -1167,6 +1170,21 @@ void Task::did_waitpid(WaitStatus status, siginfo_t* override_siginfo) {
       if (!ptrace_if_alive(PTRACE_GETSIGINFO, nullptr, &pending_siginfo)) {
         LOG(debug) << "Unexpected process death for " << tid;
         status = WaitStatus::for_ptrace_event(PTRACE_EVENT_EXIT);
+      }
+    }
+  }
+  if (SIGSEGV == status.stop_sig()) {
+    bool ok = true;
+    //printf("Cond pages %p\n", (void*)condition_pages.as_int());
+    uintptr_t cond_pages = (uintptr_t)read_mem(condition_pages, &ok);
+    //printf("Cond pages addr %p :: %d\n", (void*)cond_pages, (int)ok);
+    if (ok) {
+      //printf("siginfo addr %p :: %p\n", pending_siginfo.si_addr, (void*)cond_pages);
+      //printf("Regs rip %p\n", (void*)registers.ip().register_value());
+      if ((uintptr_t)pending_siginfo.si_addr == cond_pages + 0x1000) {
+        status = WaitStatus(W_STOPCODE(SIGTRAP));
+        pending_siginfo.si_signo = SIGTRAP;
+        pending_siginfo.si_code = SI_USER;
       }
     }
   }
@@ -1904,6 +1922,8 @@ template <typename Arch> static void do_preload_init_arch(Task* t) {
 
   t->write_mem(params.in_replay_flag.rptr(),
                (unsigned char)t->session().is_replaying());
+
+  t->condition_pages = params.condition_pages.rptr();
 }
 
 static void do_preload_init(Task* t) {

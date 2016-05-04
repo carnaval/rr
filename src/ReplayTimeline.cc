@@ -1255,7 +1255,7 @@ void ReplayTimeline::evaluate_conditions(ReplayResult& result) {
       ++it;
     }
     if (!hit) {
-      result.break_status.breakpoint_hit = false;
+      //result.break_status.breakpoint_hit = false;
     }
   }
 

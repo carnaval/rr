@@ -112,6 +112,150 @@ static int process_inited;
  */
 static unsigned char in_replay;
 
+
+static char* watch_pages;
+int rr_try_watchpoint(unsigned long val)
+{
+  if (watch_pages) {
+    unsigned long cond_value = *(unsigned long*)watch_pages;
+    __asm__("xor %%rax, %%rax\n\t"
+            "cmp %1, %2\n\t"
+            "sete %%al\n\t"
+            "movb $0, (%0,%%rax,1)\n\t"
+            "xor %1,%1\n\t"
+            :
+            : "b"(watch_pages + 0xfff), "c"(cond_value), "d"(val)
+            : "cc", "rax");
+    return 1;
+  }
+  return 0;
+}
+
+static void *(*real_malloc)(size_t size);
+static void (*real_free)(void *ptr);
+static void *(*real_calloc)(size_t nmemb, size_t size);
+static void *(*real_realloc)(void *ptr, size_t size);
+void *__libc_malloc(size_t size);
+void __libc_free(void *ptr);
+void *__libc_calloc(size_t nmemb, size_t size);
+void *__libc_realloc(void *ptr, size_t size);
+void *__libc_memalign(size_t align, size_t size);
+typedef struct mhdr {
+  struct mhdr *next;
+  struct mhdr *prev;
+  size_t alloc_n;
+  size_t size;
+  void *self;
+  char data[0];
+} malloc_hdr;
+static unsigned long alloc_counter;
+static malloc_hdr alloc_list;
+static void init_real_malloc(void)
+{
+  real_malloc = &__libc_malloc;
+  real_free = &__libc_free;
+  real_calloc = &__libc_calloc;
+  real_realloc = &__libc_realloc;
+  /*real_malloc = dlsym(RTLD_NEXT, "malloc");
+  real_free = dlsym(RTLD_NEXT, "free");
+  real_calloc = dlsym(RTLD_NEXT, "calloc");
+  real_realloc = dlsym(RTLD_NEXT, "realloc");*/
+}
+#include <stddef.h>
+void *malloc(size_t size)
+{
+  if (!real_malloc) init_real_malloc();
+  malloc_hdr *mem = (malloc_hdr*)real_calloc(1, size + sizeof(malloc_hdr));
+  mem->self = mem;
+  mem->next = alloc_list.next;
+  mem->prev = &alloc_list;
+  if (alloc_list.next)
+    alloc_list.next->prev = mem;
+  alloc_list.next = mem;
+  if (rr_try_watchpoint(++alloc_counter))
+    mem->alloc_n = alloc_counter;
+  mem->size = size;
+  return &mem->data;
+}
+int posix_memalign(void **memptr, size_t alignment, size_t size)
+{
+  if (alignment < sizeof(malloc_hdr))
+    abort();
+  void *ptr = __libc_memalign(alignment*2, size+alignment);
+  malloc_hdr *mem = (malloc_hdr*)((char*)ptr + alignment - sizeof(malloc_hdr));
+  mem->self = ptr;
+  mem->next = alloc_list.next;
+  mem->prev = &alloc_list;
+  if (alloc_list.next)
+    alloc_list.next->prev = mem;
+  alloc_list.next = mem;
+  if (rr_try_watchpoint(++alloc_counter))
+    mem->alloc_n = alloc_counter;
+  mem->size = size;
+  *memptr = &mem->data;
+  return 0;
+}
+malloc_hdr *find_malloc_base(void *ptr)
+{
+  malloc_hdr *mem = (malloc_hdr*)((char*)ptr - offsetof(malloc_hdr, data));
+  return mem;
+}
+void free(void *ptr)
+{
+  if (!real_malloc) init_real_malloc();
+  if (!ptr) return;
+  malloc_hdr *mem = find_malloc_base(ptr);
+  /*if (!mem[2])
+    mem = (void**)mem[3];*/
+  mem->prev->next = mem->next;
+  mem->next->prev = mem->prev;
+  real_free(mem->self);
+}
+
+void *calloc(size_t nmemb, size_t size)
+{
+  if (!real_malloc) init_real_malloc();
+  return malloc(nmemb*size);
+}
+static void local_memcpy(void* dest, const void* source, int n);
+void *realloc(void *ptr, size_t size)
+{
+  if (!real_malloc) init_real_malloc();
+  if (!ptr)
+    return malloc(size);
+  malloc_hdr *mem = find_malloc_base(ptr);
+  malloc_hdr hdr = *mem;
+  mem = real_realloc(mem, size + sizeof(malloc_hdr));
+  hdr.self = mem;
+  hdr.prev->next = mem;
+  hdr.next->prev = mem;
+  *mem = hdr;
+  return &mem->data;
+}
+
+void rr_malloc_dump_live(char *file)
+{
+  int fd = open(file, O_CREAT | O_RDWR | O_TRUNC, S_IRWXU);
+  if (fd < 0) {
+    int err = errno;
+    fprintf(stderr, "could not open %s : %s\n", file, strerror(err));
+    abort();
+  }
+  malloc_hdr *a = &alloc_list;
+  size_t n = 0;
+  size_t sz = 0;
+  while(a) {
+    n++;
+    sz += a->size;
+    write(fd, &a->alloc_n, sizeof(size_t));
+    write(fd, &a->size, sizeof(size_t));
+    a = a->next;
+  }
+  close(fd);
+  printf("Live %ld (%ld)\n", (long)n, (long)(sz/1024)/1024);
+  (void)file;
+}
+
 /* Number of cores to pretend we have. Initially 1; we'll reset this when
  * the syscallbuf library is initialized. */
 static int pretend_num_cores = 1;
@@ -648,6 +792,7 @@ static void __attribute__((constructor)) init_process(void) {
 #else
 #error Unknown architecture
 #endif
+
   if (process_inited) {
     return;
   }
@@ -670,8 +815,12 @@ static void __attribute__((constructor)) init_process(void) {
   params.breakpoint_table = &_breakpoint_table_entry_start;
   params.breakpoint_table_entry_size =
       &_breakpoint_table_entry_end - &_breakpoint_table_entry_start;
+  params.condition_pages = &watch_pages;
 
   privileged_traced_syscall1(SYS_rrcall_init_preload, &params);
+
+  watch_pages = mmap(0, 0x2000, PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, 0, 0);
+  mprotect(watch_pages + 0x1000, 4096, PROT_NONE);
 
   process_inited = 1;
 
